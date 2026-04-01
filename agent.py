@@ -818,7 +818,11 @@ def _history_hint(history: List[Dict[str, Any]] | None) -> str:
         prev = k
 
     if repeats >= 2:
-        return "You appear to be repeating the same action. Choose a DIFFERENT candidate or try scroll."
+        return (
+            "You are repeating the same (action, candidate_id). Pick a different candidate_id, "
+            "navigate to another screen, use scroll_down, or return a tool JSON (list_cards / search_text) "
+            "to disambiguate before clicking again."
+        )
 
     return ""
 
@@ -1509,7 +1513,10 @@ def _format_constraints_block(constraints: List[Dict[str, Any]]) -> str:
     """Format parsed constraints for LLM context."""
     if not constraints:
         return ""
-    lines = ["TASK_CONSTRAINTS (use these to find the RIGHT item and fill forms correctly):"]
+    lines = [
+        "TASK_CONSTRAINTS (use these to find the RIGHT item and fill forms correctly):",
+        "All lines below apply together (logical AND). The chosen row/card/field must satisfy every line; if none match, filter, search, or use a tool before clicking.",
+    ]
     for c in constraints:
         field = c["field"]
         op = c["op"]
@@ -2189,27 +2196,31 @@ def _classify_task(task: str) -> str:
 
 
 _PLAYBOOK_GLOBAL_PREFIX: str = (
-    "EXECUTION STANDARD: Reconcile TASK wording, TASK_CONSTRAINTS, and visible UI before each step. "
-    "When several list rows or cards could match, choose the one that satisfies every constraint at once "
-    "(use list_cards / search_text when unsure). Prefer labeled controls and primary actions over ambiguous icons. "
-    "Dismiss blocking overlays/modals before interacting underneath. "
-    "Use done only when the outcome clearly matches the task.\n\n"
+    "EXECUTION STANDARD: Before each step, align three sources: (1) exact TASK wording, "
+    "(2) TASK_CONSTRAINTS / TASK_CREDENTIALS, (3) BROWSER_STATE and PAGE/DOM snippets. "
+    "Item selection: if multiple cards or rows are plausible, pick the single one that satisfies every constraint at once; "
+    "use list_cards, list_candidates, or search_text rather than guessing. "
+    "UI hygiene: close cookie banners, dialogs, and drawers that block the target control. "
+    "Navigation: if the needed screen is missing (e.g. Inbox, Cart, Settings), navigate via nav/footer links; preserve ?seed= when present. "
+    "Verification: after submits, confirm visible feedback (toast, new URL, list update) before calling done. "
+    "done: only when the task’s success criteria are visibly satisfied on the current view.\n\n"
 )
 
 _TASK_PLAYBOOKS: Dict[str, str] = {
     "REGISTRATION": (
-        "PLAYBOOK: 1) Navigate to register/signup page. "
-        "2) Type signup_username (or username) into the username field. "
-        "3) Type signup_email (or email) into the email field. "
-        "4) Type signup_password (or password) into the password field. "
-        "5) Click submit/register button. "
-        "Use EXACT credential values from TASK_CREDENTIALS or task text."
+        "PLAYBOOK: 1) Open Register / Sign up (nav, header, or footer link). "
+        "2) Map fields: username → signup_username or username; email → signup_email or email; password → signup_password or password "
+        "(use TASK_CREDENTIALS; include trailing spaces inside values exactly). "
+        "3) Fill any other required fields with compliant values if constraints forbid certain text. "
+        "4) Submit; resolve validation errors (weak password, duplicate email) with adjusted-but-allowed values only where NOT constraints allow. "
+        "5) Confirm success state (redirect, welcome message) before done."
     ),
     "LOGIN": (
-        "PLAYBOOK: 1) Navigate to login page. "
-        "2) Type username into the username/email field EXACTLY as given. "
-        "3) Type password into the password field EXACTLY as given. "
-        "4) Click login/sign-in submit button."
+        "PLAYBOOK: 1) Open Login / Sign in. "
+        "2) Enter username or email in the identifier field—character-for-character from TASK_CREDENTIALS (including trailing spaces). "
+        "3) Enter password in the password field—same exactness. "
+        "4) Submit via the primary login button (not social placeholders unless the task requires them). "
+        "5) On failure, re-read error text; fix typos only if the task allows; otherwise try “Forgot password” only if explicitly required."
     ),
     "LOGIN_THEN_LOGOUT": (
         "PLAYBOOK: 1) Navigate to login page. "
@@ -2270,10 +2281,10 @@ _TASK_PLAYBOOKS: Dict[str, str] = {
         "3) Apply the filter."
     ),
     "NAVIGATE_DETAIL": (
-        "PLAYBOOK: 1) Browse or search for items. "
-        "2) Use list_cards or list_links tool to find item matching ALL criteria. "
-        "3) Click/navigate to that item's detail page. "
-        "If you need to filter by criteria, use search or filter controls first."
+        "PLAYBOOK: 1) Ensure you are on the correct listing (films, books, products, jobs)—search or filter first if the list is large. "
+        "2) Use list_cards to group clickable actions with surrounding text; cross-check every TASK_CONSTRAINT (genre, price, title substring, NOT clauses). "
+        "3) Prefer clicking the card row or title link whose context matches all constraints; avoid the first row if it fails any constraint. "
+        "4) After navigation, confirm the detail view shows the expected entity (title, metadata) before done or next sub-step."
     ),
     "SHARE_ITEM": (
         "PLAYBOOK: 1) Navigate to the specific item detail page. "
@@ -2314,25 +2325,33 @@ _TASK_PLAYBOOKS: Dict[str, str] = {
         "5) Submit the comment."
     ),
     "ADD_TO_CART": (
-        "PLAYBOOK: 1) Find and navigate to the specific book/item. "
-        "2) Click 'Add to Cart' button."
+        "PLAYBOOK: 1) Open the correct product/book/item detail page (constraints on title, brand, price, etc.). "
+        "2) Choose variant/options if required so the line item matches the task. "
+        "3) Click Add to Cart / Add to basket; confirm quantity or modal if shown. "
+        "4) Verify cart badge or confirmation text when visible."
     ),
     "REMOVE_FROM_CART": (
-        "PLAYBOOK: 1) Navigate to the cart page. "
-        "2) Find the specific item in cart. 3) Click Remove/Delete."
+        "PLAYBOOK: 1) Open the cart or basket page. "
+        "2) Identify the line item by title or attributes matching TASK_CONSTRAINTS. "
+        "3) Click Remove, Delete, or trash icon for that line only; confirm dialog if any. "
+        "4) Ensure the item no longer appears or quantity hits zero."
     ),
     "VIEW_CART": (
-        "PLAYBOOK: 1) Navigate to the cart page (look for Cart icon in nav)."
+        "PLAYBOOK: 1) Open Cart / Basket (icon, nav label, or /cart). "
+        "2) Scroll if needed so line items and totals are visible. "
+        "3) done when the cart contents are clearly displayed."
     ),
     "PURCHASE": (
-        "PLAYBOOK: 1) Add the item to cart. "
-        "2) Navigate to cart. 3) Click checkout/purchase button. "
-        "4) Fill out purchase form. 5) Submit."
+        "PLAYBOOK: 1) Add the constrained item(s) to cart with correct options. "
+        "2) Open cart → Proceed to checkout / Buy now. "
+        "3) Fill shipping/payment fields with exact values where equals is required; for not_equals use any valid alternative. "
+        "4) Submit order; wait for confirmation or order number before done."
     ),
     "CONTACT": (
-        "PLAYBOOK: 1) Navigate to the Contact page (look for Contact in nav). "
-        "2) Fill in name, email, message fields with EXACT values from task. "
-        "3) Submit the form."
+        "PLAYBOOK: 1) Navigate to Contact or Support. "
+        "2) Populate name, email, phone, subject, message per TASK_CREDENTIALS and constraints (CONTAINS / NOT CONTAINS). "
+        "3) Submit; if validation fails, adjust only fields that constraints permit. "
+        "4) Confirm success message or sent state when shown."
     ),
     "ADD_COMMENT": (
         "PLAYBOOK: 1) Navigate to the specific item detail page. "
@@ -3982,20 +4001,24 @@ def _llm_decide(
     all_creds = {**creds_from_task, **creds_from_data}
 
     system_msg = (
-        "You are a web automation agent. Return JSON only (no markdown). "
+        "You are a precise web automation planner. Reply with one JSON object only (no markdown, no commentary).\n"
         "Keys: action, candidate_id, text, url, evaluation_previous_goal, memory, next_goal.\n"
-        "action: click|type|select|navigate|scroll_down|scroll_up|done. "
-        "click/type/select: candidate_id=integer from BROWSER_STATE. "
-        "navigate: url=full URL (keep ?seed=X param). "
-        "done: only when task is fully completed.\n"
-        "RULES: Copy values EXACTLY from TASK_CREDENTIALS/TASK_CONSTRAINTS (include trailing spaces). "
-        "equals→type exact value. not_equals→use any OTHER value. contains→find item with that substring. "
-        "not_contains/not_in→find item WITHOUT that value. greater/less→numeric comparison.\n"
-        "CREDENTIALS: username/email may have trailing spaces - type them exactly as shown in quotes. "
-        "job_title_contains→type any title CONTAINING that substring.\n"
-        "MULTI-STEP: complete login first, then the secondary action. Track progress in memory.\n"
-        "TOOLS: Return {\"tool\":\"<name>\",\"args\":{...}} to inspect page. Max 1 tool per step. "
-        "Tools: list_cards({max_cards?,max_text?}); search_text({query}); list_links({}); extract_forms({})."
+        "Actions: click | type | select | navigate | scroll_down | scroll_up | done.\n"
+        "- click/type/select: candidate_id must be an integer index from BROWSER_STATE [n]. "
+        "Use type/select only on input/textarea/select candidates; text = exact string to type or option label to choose.\n"
+        "- navigate: url = full absolute URL; copy ?seed=… from the current URL when the benchmark uses seeds.\n"
+        "- scroll_down / scroll_up: when targets are off-screen or you are stuck in a short list.\n"
+        "- done: only when TASK success is visibly achieved on the current page (not assumed).\n"
+        "Constraint logic: TASK_CONSTRAINTS lines are combined with AND. "
+        "equals→exact match; not_equals→any different valid value; contains→substring present; "
+        "not_contains/not_in→forbidden values absent; greater/less/greater_equal/less_equal→compare numbers/dates.\n"
+        "TASK_CREDENTIALS: copy quoted values character-for-character (including trailing/leading spaces).\n"
+        "job_title_contains: type any title that includes that substring.\n"
+        "Multi-step: finish prerequisites first (e.g. login); record completed sub-steps in memory and the next sub-goal in next_goal.\n"
+        "BROWSER_STATE: lines prefixed * mark elements new since the prior step—prefer them when they match the task.\n"
+        "Optional tools (same JSON shape, no action key): {\"tool\":\"<name>\",\"args\":{...}} — "
+        "list_cards, list_candidates, search_text({query}), list_links({}), extract_forms({}), visible_text({}), css_select({selector}). "
+        "Use tools when labels are ambiguous or constraints need row text not shown in STATE."
     )
 
     history_lines: List[str] = []
@@ -4020,8 +4043,9 @@ def _llm_decide(
             cards_obj = _tool_list_cards(candidates=candidates, max_cards=6, max_text=120, max_actions_per_card=1)
             if isinstance(cards_obj, dict) and cards_obj.get("ok") and cards_obj.get("cards"):
                 cards_preview = json.dumps(cards_obj.get("cards"), ensure_ascii=True)
-                if len(cards_preview) > 600:
-                    cards_preview = cards_preview[:597] + "..."
+                _cards_cap = int(os.getenv("AGENT_CARDS_PREVIEW_MAX_CHARS", "900"))
+                if len(cards_preview) > _cards_cap:
+                    cards_preview = cards_preview[: max(0, _cards_cap - 3)] + "..."
         except Exception:
             cards_preview = ""
 
@@ -4043,14 +4067,17 @@ def _llm_decide(
             # Show the value in quotes so trailing/leading spaces are visible
             creds_block += f"  {k}: '{v}'\n"
 
-    # Cap large sections to control per-step token costs
-    page_summary_capped = page_summary[:400] if page_summary else ""
-    # DOM digest only on step 0 (first look)
-    dom_digest_capped = dom_digest[:200] if dom_digest and int(step_index) == 0 else ""
+    # Cap large sections (override with env for higher model context / quality)
+    _page_cap = int(os.getenv("AGENT_PAGE_SUMMARY_MAX_CHARS", "560"))
+    page_summary_capped = page_summary[:_page_cap] if page_summary else ""
+    _dom_cap = int(os.getenv("AGENT_DOM_DIGEST_MAX_CHARS", "360"))
+    dom_digest_capped = dom_digest[:_dom_cap] if dom_digest and int(step_index) == 0 else ""
     structured_str = json.dumps(structured, ensure_ascii=True)
-    if len(structured_str) > 500:
-        structured_str = structured_str[:497] + "..."
-    website_ctx_short = (website_ctx[:150] + "...") if len(website_ctx) > 150 else website_ctx
+    _struct_cap = int(os.getenv("AGENT_STRUCTURED_HINTS_MAX_CHARS", "620"))
+    if len(structured_str) > _struct_cap:
+        structured_str = structured_str[: max(0, _struct_cap - 3)] + "..."
+    _site_cap = int(os.getenv("AGENT_SITE_HINTS_MAX_CHARS", "340"))
+    website_ctx_short = (website_ctx[:_site_cap] + "...") if len(website_ctx) > _site_cap else website_ctx
     _pb_cap = int(os.getenv("AGENT_PLAYBOOK_MAX_CHARS", "1400"))
     playbook_capped = (playbook[:_pb_cap] + "...") if len(playbook) > _pb_cap else playbook
 
@@ -4300,8 +4327,10 @@ async def act(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     html = payload.get("snapshot_html") or ""
     history = payload.get("history") if isinstance(payload.get("history"), list) else None
     relevant_data = payload.get("relevant_data") if isinstance(payload.get("relevant_data"), dict) else None
-    page_summary = _summarize_html(html)
-    dom_digest = _dom_digest(html)
+    _sum_lim = int(os.getenv("AGENT_HTML_SUMMARY_EXTRACT_CHARS", "2400"))
+    page_summary = _summarize_html(html, limit=_sum_lim)
+    _digest_lim = int(os.getenv("AGENT_DOM_DIGEST_EXTRACT_CHARS", "2000"))
+    dom_digest = _dom_digest(html, limit=_digest_lim)
     task = str(task or "")
     task_for_llm = task
 
